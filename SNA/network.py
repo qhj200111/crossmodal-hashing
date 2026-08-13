@@ -35,29 +35,29 @@ class ImgModule(BasicModule):
     def __init__(self, y_dim, bit, n_class,norm=True, mid_num1=1024 * 8, mid_num2=1024 * 8, hiden_layer=3):
         super(ImgModule, self).__init__()
         self.module_name = "image_model"
-        mid_num1 = mid_num1 if hiden_layer > 1 else bit  # 就直接 y_dim → bit，不需要中间大通道。
-        modules = [nn.Linear(y_dim, mid_num1)]  # 列表逐层拼装，首层：(B, y_dim) → (B, mid_num1)
+        mid_num1 = mid_num1 if hiden_layer > 1 else bit  
+        modules = [nn.Linear(y_dim, mid_num1)]  
         if hiden_layer >= 2:
             modules += [nn.ReLU(inplace=True)]
             pre_num = mid_num1
-            for i in range(hiden_layer - 2):  # hiden_layer-2 是“中间重复块”个数
+            for i in range(hiden_layer - 2):  
                 if i == 0:
                     modules += [nn.Linear(mid_num1, mid_num2),
-                                nn.ReLU(inplace=True)]  # 第一次把 8192 → 8192，后面都是 8192 → 8192。
+                                nn.ReLU(inplace=True)] 
                 else:
                     modules += [nn.Linear(mid_num2, mid_num2), nn.ReLU(inplace=True)]  #
-                pre_num = mid_num2  # 每块形状：(B, 8192) → (B, 8192)
-            modules += [nn.Linear(pre_num, bit)]  # 最后一层把通道压到哈希长度：(B, pre_num) → (B, bit)
-        self.fc = nn.Sequential(*modules)  # 把列表展开成顺序容器，前向一次性跑完
-        self.norm = norm  # 保存标志位，后面决定要不要做 L2 归一化。
+                pre_num = mid_num2  
+            modules += [nn.Linear(pre_num, bit)] 
+        self.fc = nn.Sequential(*modules)  
+        self.norm = norm 
         self.classifier = nn.Linear(bit, n_class)
 
     def forward(self, x,return_logits=False):
-        out = self.fc(x).tanh()  # (B, y_dim) → (B, bit) 再 tanh 到 (-1,1)
+        out = self.fc(x).tanh() 
         if self.norm:
-            norm_x = torch.norm(out, dim=1, keepdim=True)  # (B,1) 各样本的 L2 范数
-            out = out / norm_x  # 单位超球面投影，(B, bit)
-        logits = self.classifier(out)  # ✅ 分类 logits
+            norm_x = torch.norm(out, dim=1, keepdim=True)  
+            out = out / norm_x  
+        logits = self.classifier(out) 
         if return_logits:
             return out, logits
         return out
@@ -67,29 +67,29 @@ class TxtModule(BasicModule):
     def __init__(self, y_dim, bit, n_class,norm=True, mid_num1=1024 * 8, mid_num2=1024 * 8, hiden_layer=2):
         super(TxtModule, self).__init__()
         self.module_name = "text_model"
-        mid_num1 = mid_num1 if hiden_layer > 1 else bit  # 若只建 1 层，则直接 y_dim → bit，省去中间大宽层。
-        modules = [nn.Linear(y_dim, mid_num1)]  # 列表拼装，首层：(B, y_dim) → (B, mid_num1)
-        if hiden_layer >= 2:  # 至少两层时才加激活。
+        mid_num1 = mid_num1 if hiden_layer > 1 else bit  
+        modules = [nn.Linear(y_dim, mid_num1)]
+        if hiden_layer >= 2: 
             modules += [nn.ReLU(inplace=True)]
             pre_num = mid_num1
             for i in range(
-                    hiden_layer - 2):  # hiden_layer-2 是“中间重复块”个数。第一次 8192 → 8192，后面都是 8192 → 8192。每块形状：(B, 8192) → (B, 8192)
+                    hiden_layer - 2):  
                 if i == 0:
                     modules += [nn.Linear(mid_num1, mid_num2), nn.ReLU(inplace=True)]
                 else:
                     modules += [nn.Linear(mid_num2, mid_num2), nn.ReLU(inplace=True)]
                 pre_num = mid_num2
-            modules += [nn.Linear(pre_num, bit)]  # 末层把通道压到哈希长度：(B, pre_num) → (B, bit)
-        self.fc = nn.Sequential(*modules)  # 把列表展开成顺序容器，前向一次性跑完。
-        self.norm = norm  # 保存标志位，决定出口是否做 L2 归一化。
+            modules += [nn.Linear(pre_num, bit)]  
+        self.fc = nn.Sequential(*modules)  
+        self.norm = norm  
         self.classifier = nn.Linear(bit, n_class)
 
     def forward(self, x,return_logits=False):
-        out = self.fc(x).tanh()  # (B, y_dim) → (B, bit) 再 tanh 到 (-1,1)
+        out = self.fc(x).tanh() 
         if self.norm:
-            norm_x = torch.norm(out, dim=1, keepdim=True)  # (B,1) 各样本 L2 范数
-            out = out / norm_x  # 单位超球面投影，(B, bit)
-        logits = self.classifier(out)  # ✅ 分类 logits
+            norm_x = torch.norm(out, dim=1, keepdim=True) 
+            out = out / norm_x  
+        logits = self.classifier(out) 
         if return_logits:
             return out, logits
         return out
@@ -113,9 +113,8 @@ class MyNet(BasicModule):
         self.AttentionLayerTxt = AttentionLayer(512, ori_featI, n_heads=4)
         self.FcTxt = nn.Linear(2 * 512, 512)
 
-        # 维度适配层，将增强后的特征转换为哈希网络的输入维度（y_dim）
-        self.AdjustDimsImg = nn.Linear(512, ori_featI)  # 调整图像特征维度
-        self.AdjustDimsTxt = nn.Linear(512, ori_featT)  # 调整图像特征维度
+        self.AdjustDimsImg = nn.Linear(512, ori_featI)  
+        self.AdjustDimsTxt = nn.Linear(512, ori_featT) 
 
     def forward(self, img, txt):
         self.batch_size = img.size(0)
