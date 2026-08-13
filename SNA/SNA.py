@@ -84,7 +84,6 @@ class Robust_Loss_noise(nn.Module):
         T = self.calc_neighbor(y, y)
         T.diagonal().fill_(0)
         S = u.mm(v.t())
-        # pdb.set_trace()
         d = S.diag().view(v.size(0), 1)
         d1 = d.expand_as(S)
         d2 = d.t().expand_as(S)
@@ -151,14 +150,13 @@ class Robust_Loss_clean(nn.Module):
         d2 = d.T.expand_as(S)
         margin_matrix = 0.2
         modal_consist_loss = F.mse_loss(u, v)
-        # === I -> T ===
+        
         mask_te = (S >= (d1 - margin_matrix)).float().detach()
         cost_te = S * mask_te + (1. - mask_te) * (S - self.shift)
         cost_te_max = cost_te.clone()
         cost_te_max.fill_diagonal_(0)
         cost_te_max += torch.diag(torch.diag(cost_te).clamp(min=0))
 
-        # === T -> I ===
         mask_im = (S >= (d2 - margin_matrix)).float().detach()
         cost_im = S * mask_im + (1. - mask_im) * (S - self.shift)
         cost_im_max = cost_im.clone()
@@ -198,9 +196,9 @@ def get_loss(net, txt_net, config, data_loader, Threshold, epoch, W):
         u = net(image)
         v = txt_net(tag)
         with torch.no_grad():
-            label_ = (label - 0.5) * 2  # [-1,1]
-            u_sims = u @ W.tanh().t()  # N X C  [-1, 1]
-            v_sims = v @ W.tanh().t()  # N X C  [-1, 1]
+            label_ = (label - 0.5) * 2  
+            u_sims = u @ W.tanh().t()  
+            v_sims = v @ W.tanh().t()  
             loss_ = (label_ - u_sims) ** 2
             loss_ += (label_ - v_sims) ** 2
             loss = (loss_ * label).max(1)[0]
@@ -214,22 +212,14 @@ def get_loss(net, txt_net, config, data_loader, Threshold, epoch, W):
     sorted_losses = sorted_losses.reshape(-1, 1)
     save_path = f'/home/wangla/My_method/final/pdf/loss{epoch}_dataset{config["dataset"]}_bit{config["bit_len"]}_noiserate{config["noise_rate"]}.pdf'
     labels = np.array([item[2] for item in sample_losses_sorted])
-    # gmm = GaussianMixture(n_components=2, max_iter=10, tol=5e-1, reg_covar=5e-4)
-    # loss = np.array(sorted_losses)
-    # gmm.fit(sorted_losses)
-    # prob = gmm.predict_proba(sorted_losses)
-    # prob = prob[:, gmm.means_.argmin()]
 
     bmm = BetaMixture1D(max_iters=10)
     bmm.fit(sorted_losses)
     means = bmm.alphas / (bmm.alphas + bmm.betas)
     low_idx = int(means.argmin())
-    # 1. 两条成分的后验（1D）
-    post0 = bmm.posterior(sorted_losses, 0)  # (n_samples,)
-    post1 = bmm.posterior(sorted_losses, 1)  # (n_samples,)
-    # 2. 拼成 2D (n_samples, 2)
+    post0 = bmm.posterior(sorted_losses, 0)  
+    post1 = bmm.posterior(sorted_losses, 1)  
     post = np.stack([post0, post1], axis=1)
-    # 3. 再切片就合法了
     prob = post[:, low_idx]
     if epoch + 1 >= 20:
         pred = split_prob(prob, Threshold)
@@ -246,19 +236,19 @@ def get_loss(net, txt_net, config, data_loader, Threshold, epoch, W):
 def train(config, bit):
     device = config["device"]
     train_loader, test_loader, dataset_loader, num_train, num_test, num_dataset = get_data(config)
-    config["num_train"] = num_train  # 训练样本数量
+    config["num_train"] = num_train  
     net = ImgModule(y_dim=4096, bit=bit, n_class=n_class, hiden_layer=3).to('cuda')
     txt_net = TxtModule(y_dim=tag_len, n_class=n_class, bit=bit, hiden_layer=2).to('cuda')
     W = torch.Tensor(n_class, bit_len)
     W = torch.nn.init.orthogonal_(W, gain=1)
     W = torch.tensor(W, requires_grad=True).cuda()
     W = torch.nn.Parameter(W)
-    net.register_parameter('W', W)  # regist W into the image net
+    net.register_parameter('W', W)  
     get_grad_params = lambda model: [x for x in model.parameters() if x.requires_grad]
     params_dnet = get_grad_params(net)
     optimizer = config["optimizer"]["type"](params_dnet, **(config["optimizer"]["optim_params"]))
     txt_optimizer = config["txt_optimizer"]["type"](txt_net.parameters(), **(config["txt_optimizer"]["optim_params"]))
-    # Robust_Loss
+    
     criterion_clean = Robust_Loss_clean(config, bit)
     criterion_noise = Robust_Loss_noise(config, bit)
     threshold_schedule = np.linspace(0, config["threshold_rate"], num_gradual)
@@ -330,9 +320,9 @@ def train(config, bit):
 
                 train_loss += loss_clean.item()
 
-                clean_features = (u_clean + v_clean) / 2.0  # 特征融合
-                clean_labels = label_clean  # 干净样本的真实标签
-                # 提取噪声样本并纠正标签
+                clean_features = (u_clean + v_clean) / 2.0  
+                clean_labels = label_clean 
+
             if noise_samples.sum() > 0 and clean_features is not None and len(clean_features) >= 3:
                 noise_samples = noise_samples.squeeze(-1)
                 image_noise = image[noise_samples].cuda().float()
@@ -340,30 +330,21 @@ def train(config, bit):
                 label_noise = label[noise_samples].cuda().float()
 
                 with torch.no_grad():
-                    # 提取噪声样本的特征
+
                     u_noise = net(image_noise)
                     v_noise = txt_net(tag_noise)
-                    noise_features = (u_noise + v_noise) / 2.0  # 同样融合特征
+                    noise_features = (u_noise + v_noise) / 2.0 
 
-                    # ========== 核心：基于相似度的标签矫正 ==========
-                    # 1. 计算噪声样本与所有干净样本的余弦相似度
-                    # 归一化特征以计算余弦相似度
                     noise_features_norm = F.normalize(noise_features, dim=1)
                     clean_features_norm = F.normalize(clean_features, dim=1)
 
-                    # 相似度矩阵: [num_noise, num_clean]
                     similarity = torch.mm(noise_features_norm, clean_features_norm.t())
 
-                    # 2. Top-K选择（K=3）：获取每个噪声样本最相似的3个干净样本的索引
                     topk_sim, topk_idx = torch.topk(similarity, k=3, dim=1)
 
-                    # 3. 提取对应干净样本的标签并求平均作为矫正标签
-                    # 按索引获取top-k干净样本的标签: [num_noise, 3, num_classes]
                     topk_labels = clean_labels[topk_idx]
-                    # 对3个标签求平均: [num_noise, num_classes]
                     corrected_label_noisy = torch.mean(topk_labels, dim=1)
 
-                # 使用纠正后的伪标签训练噪声样本
                 optimizer.zero_grad()
                 txt_optimizer.zero_grad()
 
@@ -393,7 +374,6 @@ def test(config, bit, model_path='./checkpoint/best_model.pth'):
     W = torch.tensor(W, requires_grad=True).cuda()
     W = torch.nn.Parameter(W)
     net.register_parameter('W', W)
-    # Load the saved models
     checkpoint = torch.load(model_path)
     net.load_state_dict(checkpoint['net_state_dict'])
     txt_net.load_state_dict(checkpoint['txt_net_state_dict'])
@@ -414,7 +394,7 @@ def test(config, bit, model_path='./checkpoint/best_model.pth'):
 
 if __name__ == "__main__":
     data_name_list = ['ms-coco']
-    bit_list = [16, 32, 64, 128]
+    bit_list = [16]
     noise_rate_list = [0.8]
     for data_name in data_name_list:
         for rate in noise_rate_list:
