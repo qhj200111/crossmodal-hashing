@@ -40,7 +40,6 @@ class BetaMixture1D(object):
 
     def responsibilities(self, x):
         r =  np.array([self.weighted_likelihood(x, i) for i in range(2)])
-        # there are ~200 samples below that value
         r[r <= self.eps_nan] = self.eps_nan
         r /= r.sum(axis=0)
         return r
@@ -51,17 +50,14 @@ class BetaMixture1D(object):
     def fit(self, x):
         x = np.copy(x)
 
-        # EM on beta distributions unsable with x == 0 or 1
         eps = 1e-4
         x[x >= 1 - eps] = 1 - eps
         x[x <= eps] = eps
 
         for i in range(self.max_iters):
 
-            # E-step
             r = self.responsibilities(x)
 
-            # M-step
             self.alphas[0], self.betas[0] = fit_beta_weighted(x, r[0])
             self.alphas[1], self.betas[1] = fit_beta_weighted(x, r[1])
             self.weight = r.sum(axis=1)
@@ -77,7 +73,7 @@ class BetaMixture1D(object):
         lookup_t = self.posterior(x_l, y)
         lookup_t[np.argmax(lookup_t):] = lookup_t.max()
         self.lookup = lookup_t
-        self.lookup_loss = x_l # I do not use this one at the end
+        self.lookup_loss = x_l
 
     def look_lookup(self, x):
         x_i = x.clone().cpu().numpy()
